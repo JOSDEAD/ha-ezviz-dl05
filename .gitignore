@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+volcado_dl05/
+venv/

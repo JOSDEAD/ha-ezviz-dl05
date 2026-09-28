@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Cerradura EZVIZ DL05",
+        "description": "Use la misma cuenta que la app de EZVIZ. La region es un codigo corto (us, eu, sgp) o el nombre completo del servidor.",
+        "data": {
+          "username": "Correo",
+          "password": "Contraseña",
+          "serial_number": "Numero de serie del dispositivo",
+          "region": "Region"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Correo o contraseña incorrectos.",
+      "cannot_connect": "No se pudo contactar el servidor de EZVIZ de esa region.",
+      "device_not_found": "Ese numero de serie no esta en la cuenta. Revise el registro de Home Assistant para ver la lista de dispositivos disponibles.",
+      "mfa_required": "La cuenta pide codigo de verificacion. Desactive la verificacion en dos pasos o use una cuenta compartida aparte.",
+      "unknown": "Error inesperado, revise el registro."
+    },
+    "abort": {
+      "already_configured": "Esa cerradura ya esta configurada."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones del DL05",
+        "data": {
+          "enable_lock_entity": "Activar apertura remota (entidad de cerradura)",
+          "lock_no": "Numero de cerrojo (2 = puerta, 1 = porton)",
+          "event_interval": "Segundos entre lecturas del registro de eventos",
+          "relock_seconds": "Segundos antes de asumir que el seguro volvio a pasar"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "door": {
+        "name": "Puerta"
+      },
+      "bolt": {
+        "name": "Seguro"
+      },
+      "doorbell": {
+        "name": "Timbre"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Bateria"
+      },
+      "last_event": {
+        "name": "Ultimo evento"
+      },
+      "last_user": {
+        "name": "Ultimo usuario"
+      },
+      "last_method": {
+        "name": "Metodo de apertura"
+      },
+      "wifi_signal": {
+        "name": "Señal Wi-Fi"
+      },
+      "wifi_ssid": {
+        "name": "Red Wi-Fi"
+      },
+      "ip_address": {
+        "name": "Direccion IP"
+      },
+      "error_count": {
+        "name": "Intentos fallidos"
+      }
+    },
+    "lock": {
+      "lock": {
+        "name": "Cerradura"
+      }
+    }
+  }
+}

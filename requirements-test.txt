@@ -1,0 +1,3 @@
+# Arnes de pruebas. Fija la version de Home Assistant contra la que se prueba:
+# pytest-homeassistant-custom-component arrastra el HA correspondiente.
+pytest-homeassistant-custom-component==0.13.205

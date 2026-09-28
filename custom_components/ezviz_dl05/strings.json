@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EZVIZ DL05 Lock",
+        "description": "Use the same account as the EZVIZ app. The region is a short code (us, eu, sgp) or a full host name.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "serial_number": "Device serial number",
+          "region": "Region"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Could not reach the EZVIZ servers for that region.",
+      "device_not_found": "That serial number is not in this account. Check the Home Assistant log for the list of available devices.",
+      "mfa_required": "The account requires a verification code. Disable two-step verification for this account or use a dedicated shared account.",
+      "unknown": "Unexpected error, see the log."
+    },
+    "abort": {
+      "already_configured": "That lock is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DL05 options",
+        "data": {
+          "enable_lock_entity": "Enable remote unlock (lock entity)",
+          "lock_no": "Lock number (2 = door, 1 = gate)",
+          "event_interval": "Seconds between event-log checks",
+          "relock_seconds": "Seconds before assuming the bolt closed again"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "door": {
+        "name": "Door"
+      },
+      "bolt": {
+        "name": "Bolt"
+      },
+      "doorbell": {
+        "name": "Doorbell"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "last_event": {
+        "name": "Last event"
+      },
+      "last_user": {
+        "name": "Last user"
+      },
+      "last_method": {
+        "name": "Unlock method"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi signal"
+      },
+      "wifi_ssid": {
+        "name": "Wi-Fi network"
+      },
+      "ip_address": {
+        "name": "IP address"
+      },
+      "error_count": {
+        "name": "Failed attempts"
+      }
+    },
+    "lock": {
+      "lock": {
+        "name": "Lock"
+      }
+    }
+  }
+}
