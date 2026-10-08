@@ -289,23 +289,151 @@ class EzvizDl05Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         tipo = info.get("type") if isinstance(info.get("type"), str) else None
         return resource_id, local_index, info.get("streamToken"), tipo
 
-    async def async_abrir(self) -> None:
-        """Manda el comando de apertura remota."""
-        resource_id, local_index, stream_token, tipo = self._ruta_recurso()
-        usuario = str(getattr(self.client, "_token", {}).get("username") or "")
+    def _bind_codes(self) -> list[tuple[str, str]]:
+        """bindCodes candidatos, como (bindCode, etiqueta).
 
-        def enviar() -> bool:
-            return self.client.remote_unlock(
-                self.serial,
-                usuario,
-                self.lock_no,
-                resource_id=resource_id,
-                local_index=local_index,
-                stream_token=stream_token,
-                lock_type=tipo,
+        La cerradura solo acepta aperturas de terminales que conoce (el
+        bindCode es featureCode + userId de la terminal). Primero va el de la
+        sesion de Home Assistant (``s`` + ``aud`` del JWT) y despues los de las
+        terminales registradas en la cuenta, de la mas reciente a la mas
+        antigua, para usar la del app movil si la de HA no esta autorizada.
+        """
+        candidatos: list[tuple[str, str]] = []
+        sesion = str(getattr(self.client, "_token", {}).get("session_id") or "")
+        partes = sesion.split(".")
+        if len(partes) == 3:
+            cuerpo = partes[1] + "=" * (-len(partes[1]) % 4)
+            try:
+                datos = json.loads(base64.urlsafe_b64decode(cuerpo))
+            except (binascii.Error, ValueError, UnicodeDecodeError):
+                datos = {}
+            firma, cliente = datos.get("s"), datos.get("aud")
+            if isinstance(firma, str) and isinstance(cliente, str) and firma and cliente:
+                candidatos.append((f"{firma}{cliente}", "sesion de Home Assistant"))
+        try:
+            terminales = self.client.get_terminals().get("terminals") or []
+        except PyEzvizError as err:
+            _LOGGER.debug("Cerrojo %s: no se pudo leer las terminales: %s", self.serial, err)
+            terminales = []
+        validas = [
+            t
+            for t in terminales
+            if isinstance(t, dict) and str(t.get("sign") or "").strip() and str(t.get("userId") or "").strip()
+        ]
+        validas.sort(key=lambda t: str(t.get("lastModifytime") or t.get("lastModifyTime") or ""), reverse=True)
+        for terminal in validas:
+            codigo = f"{str(terminal['sign']).strip()}{str(terminal['userId']).strip()}"
+            nombre = str(terminal.get("name") or terminal.get("terminalName") or "terminal")
+            if all(codigo != c for c, _ in candidatos):
+                candidatos.append((codigo, f"terminal '{nombre}'"))
+        return candidatos
+
+    async def async_abrir(self) -> None:
+        """Abre igual que el app EZVIZ: pide un codigo y luego lo usa.
+
+        Flujo capturado del app iOS para el DL05:
+        1. PUT .../DoorLock/<i>/DoorLockMgr/QueryRemoteUnlockRandomCode {"value": {}}
+           -> data.randomCode (lo genera EZVIZ, un solo uso)
+        2. PUT .../DoorLock/<i>/DoorLockMgr/RemoteUnlockReq
+           {"value": {"unLockInfo": {"bindCode", "randomCode", "type": "unLinkIPC", "userName"}}}
+
+        pyezvizapi.remote_unlock usa otro cuerpo (sin "value", con lockNo y
+        sin randomCode) que el DL05 rechaza con meta 400, y ademas devuelve
+        True aunque falle; por eso se llama a los endpoints directamente y se
+        revisa meta.code en cada paso.
+        """
+        recursos = (self.data or {}).get("resourceInfos") or []
+        info = next((r for r in recursos if isinstance(r, dict)), None) or {}
+        recurso = info.get("resourceIdentifier") or "DoorLock"
+        indice = info.get("localIndex")
+        indice = str(indice) if indice is not None else "0"
+        # El app manda el identificador con el que se inicia sesion (el email),
+        # no loginUser.username, que es un nombre interno de la cuenta.
+        usuario = str(
+            getattr(self.client, "account", None) or getattr(self.client, "_token", {}).get("username") or ""
+        )
+
+        base = f"/v3/iot-feature/action/{self.serial}/{recurso}/{indice}/DoorLockMgr"
+
+        def revisar(respuesta: Any, paso: str) -> dict[str, Any]:
+            meta = respuesta.get("meta") if isinstance(respuesta, dict) else None
+            codigo = meta.get("code") if isinstance(meta, dict) else None
+            mensaje = meta.get("message") if isinstance(meta, dict) else None
+            _LOGGER.info("Cerrojo %s: %s -> meta %s %s", self.serial, paso, codigo, mensaje)
+            if codigo != 200:
+                raise PyEzvizError(f"EZVIZ rechazo {paso} (meta {codigo}: {mensaje})")
+            return respuesta
+
+        def pedir(ruta: str, cuerpo: dict[str, Any], paso: str) -> dict[str, Any]:
+            try:
+                respuesta = self.client._request_json(  # noqa: SLF001
+                    "PUT", f"{base}/{ruta}", json_body=cuerpo, retry_401=True, max_retries=0
+                )
+            except PyEzvizError as err:
+                causa = err.__cause__
+                detalle = getattr(getattr(causa, "response", None), "text", "") or str(causa or err)
+                _LOGGER.warning("Cerrojo %s: %s fallo: %s", self.serial, paso, detalle[:500])
+                raise PyEzvizError(f"EZVIZ rechazo {paso}: {detalle[:200]}") from err
+            return revisar(respuesta, paso)
+
+        def abrir_con(bind_code: str) -> dict[str, Any]:
+            codigo = pedir("QueryRemoteUnlockRandomCode", {"value": {}}, "la solicitud de codigo de apertura")
+            random_code = (codigo.get("data") or {}).get("randomCode")
+            if not random_code:
+                raise PyEzvizError("EZVIZ no entrego codigo de apertura (randomCode)")
+            return self.client._request_json(  # noqa: SLF001
+                "PUT",
+                f"{base}/RemoteUnlockReq",
+                json_body={
+                    "value": {
+                        "unLockInfo": {
+                            "bindCode": bind_code,
+                            "randomCode": str(random_code),
+                            "type": "unLinkIPC",
+                            "userName": usuario,
+                        }
+                    }
+                },
+                retry_401=True,
+                max_retries=0,
             )
 
+        def enviar() -> None:
+            candidatos = self._bind_codes()
+            if not candidatos:
+                raise PyEzvizError("No hay bindCode para la apertura remota")
+            ultimo = ""
+            for bind_code, etiqueta in candidatos:
+                try:
+                    respuesta = abrir_con(bind_code)
+                except PyEzvizError as err:
+                    causa = err.__cause__
+                    texto = getattr(getattr(causa, "response", None), "text", "") or str(err)
+                    try:
+                        respuesta = json.loads(texto)
+                    except ValueError:
+                        raise PyEzvizError(f"EZVIZ rechazo la apertura remota: {texto[:200]}") from err
+                meta = respuesta.get("meta") if isinstance(respuesta, dict) else None
+                codigo = meta.get("code") if isinstance(meta, dict) else None
+                dispositivo = ((meta or {}).get("moreInfo") or {}).get("deviceMeta") or {}
+                _LOGGER.info(
+                    "Cerrojo %s: apertura con %s -> meta %s, cerrojo %s %s",
+                    self.serial,
+                    etiqueta,
+                    codigo,
+                    dispositivo.get("code"),
+                    dispositivo.get("errorMsg"),
+                )
+                if codigo == 200:
+                    return
+                ultimo = json.dumps(respuesta)[:200]
+                # 0x00018014: el cerrojo no reconoce esta terminal; se prueba la siguiente.
+                if dispositivo.get("code") != "0x00018014":
+                    break
+            raise PyEzvizError(f"EZVIZ rechazo la apertura remota: {ultimo}")
+
         await self.hass.async_add_executor_job(enviar)
+
         if self.estado_nativo:
             # El cerrojo publica su propio estado: se le pregunta a el en vez
             # de suponer que el comando funciono.
